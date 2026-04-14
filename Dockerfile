@@ -25,17 +25,24 @@ RUN pip install --upgrade pip && \
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
+# ── Bake weights into the image ──
+# Downloaded once at build time. First cold start drops from ~6 min
+# (runtime download) to ~10s (just load from image layer to VRAM).
+# Eliminates the "network volume fills up with partial downloads" failure
+# mode and removes the Network Volume as a runtime dependency.
+# Image grows to ~35-40 GB which is fine on Runpod.
+ENV HF_HOME=/root/.cache/huggingface \
+    HF_HUB_CACHE=/root/.cache/huggingface \
+    TRANSFORMERS_CACHE=/root/.cache/huggingface \
+    HF_HUB_DOWNLOAD_TIMEOUT=600
+
+RUN python -c "\
+from huggingface_hub import snapshot_download; \
+snapshot_download('Qwen/Qwen-Image', allow_patterns=['*.safetensors', '*.json', '*.txt', '*.model']); \
+snapshot_download('lightx2v/Qwen-Image-Lightning', allow_patterns=['Qwen-Image-Lightning-8steps-V1.0.safetensors', '*.json']); \
+print('weights cached to /root/.cache/huggingface') \
+"
+
 COPY handler.py .
-
-# Hugging Face cache lives on the Network Volume mounted by Runpod.
-# /runpod-volume is the conventional mount path.
-ENV HF_HOME=/runpod-volume/huggingface \
-    HF_HUB_CACHE=/runpod-volume/huggingface \
-    TRANSFORMERS_CACHE=/runpod-volume/huggingface
-
-# Optional: pre-warm by downloading the model at build time. Disabled by
-# default — keeps the image small and lets the Network Volume cache do
-# its job on first cold start.
-# RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('Qwen/Qwen-Image')"
 
 CMD ["python", "-u", "handler.py"]
