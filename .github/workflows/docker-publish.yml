@@ -1,0 +1,75 @@
+name: Build and Publish Image
+
+# Builds the Qwen-Image + Lightning LoRA serverless worker and publishes to
+# GitHub Container Registry. Runpod pulls from ghcr.io at worker start —
+# no build timeout ceiling, and first-cold-start drops from ~6 min (runtime
+# model download) to ~10s (just layer pull).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Free up disk space (remove pre-installed tooling we don't need)
+        # Default GitHub runners have ~14 GB free. Our image is ~35 GB.
+        # Strip Android SDK, .NET, Haskell, CodeQL, and the pre-pulled Docker
+        # images to get roughly 40-50 GB free before we start building.
+        uses: easimon/maximize-build-space@v10
+        with:
+          root-reserve-mb: 2048
+          temp-reserve-mb: 2048
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/qwen-image-worker
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=,format=short
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Don't cache between runs — the cache layer for 35 GB of weights
+          # would itself take forever to pull and push. Clean builds every time.
+          cache-from: type=gha,scope=deps
+          cache-to: type=gha,mode=max,scope=deps
+
+      - name: Summary
+        run: |
+          echo "Image pushed as:" >> $GITHUB_STEP_SUMMARY
+          echo '${{ steps.meta.outputs.tags }}' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Point your Runpod endpoint at:" >> $GITHUB_STEP_SUMMARY
+          echo '`ghcr.io/${{ github.repository_owner }}/qwen-image-worker:latest`' >> $GITHUB_STEP_SUMMARY
