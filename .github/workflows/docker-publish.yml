@@ -18,19 +18,22 @@ jobs:
       packages: write
 
     steps:
-      - name: Free up disk space (remove pre-installed tooling we don't need)
+      - name: Free up disk space
         # Default GitHub runners have ~14 GB free. Our image is ~35 GB.
-        # Strip Android SDK, .NET, Haskell, CodeQL, and the pre-pulled Docker
+        # Strip Android SDK, .NET, Haskell, CodeQL, and pre-pulled Docker
         # images to get roughly 40-50 GB free before we start building.
-        uses: easimon/maximize-build-space@v10
+        uses: jlumbroso/free-disk-space@main
         with:
-          root-reserve-mb: 2048
-          temp-reserve-mb: 2048
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Show disk space after cleanup
+        run: df -h /
 
       - name: Checkout
         uses: actions/checkout@v4
